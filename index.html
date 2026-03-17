@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>方块世界 - 网页版</title>
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+
+<body>
+  <div id="ui-container">
+    <div id="f3-debug" style="display:none;"></div>
+    <div id="crosshair">+</div>
+    <div id="hotbar">
+      <div class="slot active" id="slot-1" style="background-color: #55aa55;"><span class="count"></span></div>
+      <div class="slot" id="slot-2" style="background-color: #8b5a2b;"><span class="count"></span></div>
+      <div class="slot" id="slot-3" style="background-color: #888888;"><span class="count"></span></div>
+      <div class="slot" id="slot-4" style="background-color: #3366ff;"><span class="count"></span></div>
+      <div class="slot" id="slot-5" style="background-color: #7a5230;"><span class="count"></span></div>
+      <div class="slot" id="slot-6" style="background-color: #3c8c30;"><span class="count"></span></div>
+    </div>
+
+    <!-- Mobile Controls -->
+    <div id="mobile-controls">
+      <div id="joystick-zone"></div>
+      <div id="touch-look-zone"></div>
+      <div id="action-buttons">
+        <button class="btn" id="btn-fly" style="display:none; background: rgba(52, 152, 219, 0.5);">飞行</button>
+        <button class="btn" id="btn-descend" style="display:none; background: rgba(149, 165, 166, 0.5);">下降</button>
+        <button class="btn" id="btn-jump">跳跃</button>
+        <button class="btn" id="btn-break">挖掘</button>
+        <button class="btn" id="btn-place">放置</button>
+      </div>
+    </div>
+
+    <div id="instructions">
+      <div class="title">我的方块世界</div>
+      <div class="subtitle">选择游戏模式开始</div>
+
+      <div id="menu-buttons">
+        <button class="menu-btn" id="btn-continue" style="display:none; background: #f1c40f;">继续游戏</button>
+        <button class="menu-btn" id="btn-creative">创造模式</button>
+        <button class="menu-btn" id="btn-flat">平坦世界</button>
+        <button class="menu-btn" id="btn-survival">生存模式</button>
+        <button class="menu-btn" id="btn-reset-save"
+          style="background: #e74c3c; margin-top: 10px; font-size: 14px;">清空所有存档</button>
+      </div>
+
+      <div class="controls">
+        <p><b>创造模式：</b>双击空格飞行，无限方块</p>
+        <p><b>生存模式：</b>挖掘获得方块，消耗方块放置</p>
+        <p><b>通用操作：</b>WASD 移动，空格跳跃，左右键操作</p>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+
+</html>

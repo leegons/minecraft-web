@@ -1,0 +1,266 @@
+/* 全局初始化 */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  overflow: hidden;
+  background-color: #87CEEB; /* 天蓝色背景 */
+  font-family: 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', 'Courier New', Courier, monospace;
+}
+
+/* UI 容器：覆盖全屏，但不拦截鼠标点击（允许点击穿透到 3D 场景） */
+#ui-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none; 
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* 准星 */
+#crosshair {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 24px;
+  font-weight: bold;
+  text-shadow: 1px 1px 2px black;
+  user-select: none;
+}
+
+/* 操作指南叠加层（启动画面） */
+#instructions {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.7);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  color: white;
+  pointer-events: auto; /* 拦截点击以激活指针锁定 */
+  cursor: pointer;
+  z-index: 10;
+}
+
+#instructions .title {
+  font-size: 52px;
+  font-weight: bold;
+  margin-bottom: 10px;
+  text-shadow: 3px 3px 0px #3a6e22, 2px 2px 4px black;
+  letter-spacing: 4px;
+  color: #7de857;
+}
+
+#instructions .subtitle {
+  font-size: 24px;
+  margin-bottom: 30px;
+  animation: pulse 1.5s infinite;
+}
+
+#instructions .controls {
+  font-size: 16px;
+  text-align: center;
+  line-height: 1.5;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 20px;
+  border-radius: 10px;
+  border: 1px solid #555;
+}
+
+/* 呼吸灯动画 */
+@keyframes pulse {
+  0% { opacity: 0.6; }
+  50% { opacity: 1; }
+  100% { opacity: 0.6; }
+}
+
+/* 游戏开始后隐藏指南 */
+body.playing #instructions {
+  display: none;
+}
+
+/* 底部物品栏（快捷栏） */
+#hotbar {
+  position: absolute;
+  bottom: 20px;
+  display: flex;
+  gap: 10px;
+  pointer-events: auto;
+}
+
+.slot {
+  width: 50px;
+  height: 50px;
+  border: 3px solid #333;
+  border-radius: 5px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-weight: bold;
+  font-size: 20px;
+  color: white;
+  text-shadow: 1px 1px 2px black;
+  opacity: 0.6;
+  transition: all 0.2s;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  position: relative;
+}
+
+/* 选中槽位的样式 */
+.slot.active {
+  border-color: #fff;
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+.slot .count {
+  position: absolute;
+  bottom: 2px;
+  right: 4px;
+  font-size: 12px;
+  color: white;
+  text-shadow: 1px 1px 2px black;
+}
+
+/* 移动端控制布局 */
+#mobile-controls {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  display: none;
+  z-index: 5;
+}
+
+/* 只在移动设备且游戏中显示 */
+body.playing.is-mobile #mobile-controls {
+  display: block;
+}
+
+/* 虚拟摇杆区域 */
+#joystick-zone {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  width: 160px;
+  height: 160px;
+  pointer-events: auto;
+  z-index: 20;
+  touch-action: none;
+}
+
+/* 触摸转头区域 */
+#touch-look-zone {
+  position: absolute;
+  top: 0;
+  left: 190px;
+  right: 120px;
+  height: 100%;
+  pointer-events: auto;
+  z-index: 6;
+  touch-action: none;
+}
+
+/* 交互按钮区域（跳跃、挖掘、放置） */
+#action-buttons {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  pointer-events: auto;
+  z-index: 20;
+  touch-action: none;
+}
+
+.btn {
+  background: rgba(255, 255, 255, 0.3);
+  border: 2px solid white;
+  border-radius: 50%;
+  width: 60px;
+  height: 60px;
+  color: white;
+  font-weight: bold;
+  font-size: 14px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  user-select: none;
+  touch-action: none;
+}
+
+.btn:active {
+  background: rgba(255, 255, 255, 0.6);
+  transform: scale(0.95);
+}
+
+/* 移动端将快捷栏移至顶部 */
+body.is-mobile #hotbar {
+  bottom: auto;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+#menu-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  width: 250px;
+  margin-bottom: 30px;
+}
+
+.menu-btn {
+  padding: 12px;
+  font-size: 18px;
+  font-weight: bold;
+  color: white;
+  background: #34495e;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.menu-btn:hover {
+  background: #2c3e50;
+  border-color: #fff;
+  transform: scale(1.05);
+}
+
+/* F3 调试面板样式 */
+#f3-debug {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background-color: rgba(0, 0, 0, 0.4);
+  color: white;
+  padding: 8px 12px;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 14px;
+  line-height: 1.4;
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 100;
+  white-space: pre-wrap;
+}
+
+/* 首页显示时隐藏 F3 面板 */
+body:not(.playing) #f3-debug {
+  display: none !important;
+}
