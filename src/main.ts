@@ -48,6 +48,8 @@ const btnContinue = document.getElementById('btn-continue') as HTMLButtonElement
 const btnCreative = document.getElementById('btn-creative');
 const btnFlat = document.getElementById('btn-flat');
 const btnSurvival = document.getElementById('btn-survival');
+const btnResetSave = document.getElementById('btn-reset-save');
+const languageToggle = document.getElementById('language-toggle');
 
 // 快捷栏槽位
 const slots = [
@@ -110,6 +112,87 @@ document.getElementById('btn-reset-save')?.addEventListener('click', (e) => {
     window.location.reload();
   }
 });
+
+// 语言切换功能
+let currentLanguage = 'zh'; // 默认中文
+const languageToggle = document.getElementById('language-toggle');
+if (languageToggle) {
+  languageToggle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    currentLanguage = currentLanguage === 'zh' ? 'en' : 'zh';
+    updateLanguage(currentLanguage);
+  });
+}
+
+/**
+ * 更新游戏界面语言
+ */
+function updateLanguage(lang: string) {
+  if (lang === 'en') {
+    // 英文模式 - 更新按钮文本
+    if (btnCreative) btnCreative.textContent = 'Creative Mode';
+    if (btnFlat) btnFlat.textContent = 'Flat World';
+    if (btnSurvival) btnSurvival.textContent = 'Survival Mode';
+    if (btnResetSave) btnResetSave.textContent = 'Clear All Saves';
+    
+    const title = document.querySelector('.title');
+    const subtitle = document.querySelector('.subtitle');
+    const controls = document.querySelector('.controls');
+    
+    if (title) title.textContent = 'My Block World';
+    if (subtitle) subtitle.textContent = 'Choose game mode to start';
+    if (controls) {
+      controls.innerHTML = `
+        <p><b>Creative Mode:</b> Double-tap space to fly, unlimited blocks</p>
+        <p><b>Survival Mode:</b> Mine to get blocks, consume blocks to place</p>
+        <p><b>General Controls:</b> WASD to move, Space to jump, mouse buttons to interact</p>
+      `;
+    }
+    
+    // 更新 F3 调试面板的语言
+    const debugElement = document.getElementById('f3-debug');
+    if (debugElement && showDebug) {
+      const text = debugElement.innerText;
+      const updatedText = text
+        .replace('我的方块世界 (F3 调试)', 'Block World (F3 Debug)')
+        .replace('坐标:', 'Coordinates:')
+        .replace('方块:', 'Block:')
+        .replace('面向:', 'Facing:')
+        .replace('时间:', 'Time:')
+        .replace('东 (+X)', 'East (+X)')
+        .replace('西 (-X)', 'West (-X)')
+        .replace('南 (+Z)', 'South (+Z)')
+        .replace('北 (-Z)', 'North (-Z)')
+        .replace('生存', 'Survival')
+        .replace('创造', 'Creative')
+        .replace('平坦', 'Flat');
+      debugElement.innerText = updatedText;
+    }
+  } else {
+    // 中文模式 - 恢复原始文本
+    if (btnCreative) btnCreative.textContent = '创造模式';
+    if (btnFlat) btnFlat.textContent = '平坦世界';
+    if (btnSurvival) btnSurvival.textContent = '生存模式';
+    if (btnResetSave) btnResetSave.textContent = '清空所有存档';
+    
+    const title = document.querySelector('.title');
+    const subtitle = document.querySelector('.subtitle');
+    const controls = document.querySelector('.controls');
+    
+    if (title) title.textContent = '我的方块世界';
+    if (subtitle) subtitle.textContent = '选择游戏模式开始';
+    if (controls) {
+      controls.innerHTML = `
+        <p><b>创造模式：</b>双击空格飞行，无限方块</p>
+        <p><b>生存模式：</b>挖掘获得方块，消耗方块放置</p>
+        <p><b>通用操作：</b>WASD 移动，空格跳跃，左右键操作</p>
+      `;
+    }
+    
+    // 恢复 F3 调试面板的中文
+    updateDebugInfo(); // 重新生成调试信息
+  }
+}
 
 /**
  * 初始化游戏引擎
