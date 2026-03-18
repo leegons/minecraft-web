@@ -1,5 +1,7 @@
 # 🌍 方块世界 (Minecraft Web)
 
+[English Version](README_en.md) | [中文版本](README.md)
+
 一个基于 **Three.js** 开发的高性能网页版体素沙盒游戏。本项目完全由代码编写，支持地形生成、建筑、昼夜循环、存档等核心功能，且不依赖外部资源包。
 
 ## ✨ 功能特性
