@@ -80,29 +80,33 @@ let inventory: Inventory;
 const npcs: NPC[] = [];
 
 let gameStarted = false;
+let animationFrameId: number | null = null;
+let autoSaveTimer: number | null = null;
+let desktopCleanup: (() => void) | null = null;
+let mobileCleanup: (() => void) | null = null;
 
 // --- 存档集成 ---
-if (Save.hasSave() && btnContinue) {
+if (Save.hasAnySave() && btnContinue) {
   btnContinue.style.display = 'block';
 }
 
 btnContinue?.addEventListener('click', (e) => {
   e.stopPropagation();
-  const saved = Save.loadGame();
+  const saved = Save.loadLatestGame();
   if (saved) startGame(saved.mode, saved.inventory);
 });
 
 btnCreative?.addEventListener('click', (e) => {
   e.stopPropagation();
-  startGame('creative');
+  startOrResumeGame('creative');
 });
 btnFlat?.addEventListener('click', (e) => {
   e.stopPropagation();
-  startGame('flat');
+  startOrResumeGame('flat');
 });
 btnSurvival?.addEventListener('click', (e) => {
   e.stopPropagation();
-  startGame('survival');
+  startOrResumeGame('survival');
 });
 
 document.getElementById('btn-reset-save')?.addEventListener('click', (e) => {
@@ -115,7 +119,6 @@ document.getElementById('btn-reset-save')?.addEventListener('click', (e) => {
 
 // 语言切换功能
 let currentLanguage = 'zh'; // 默认中文
-const languageToggle = document.getElementById('language-toggle');
 if (languageToggle) {
   languageToggle.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -130,6 +133,7 @@ if (languageToggle) {
 function updateLanguage(lang: string) {
   if (lang === 'en') {
     // 英文模式 - 更新按钮文本
+    if (btnContinue) btnContinue.textContent = 'Continue Last Game';
     if (btnCreative) btnCreative.textContent = 'Creative Mode';
     if (btnFlat) btnFlat.textContent = 'Flat World';
     if (btnSurvival) btnSurvival.textContent = 'Survival Mode';
@@ -170,6 +174,7 @@ function updateLanguage(lang: string) {
     }
   } else {
     // 中文模式 - 恢复原始文本
+    if (btnContinue) btnContinue.textContent = '继续游戏';
     if (btnCreative) btnCreative.textContent = '创造模式';
     if (btnFlat) btnFlat.textContent = '平坦世界';
     if (btnSurvival) btnSurvival.textContent = '生存模式';
@@ -194,12 +199,22 @@ function updateLanguage(lang: string) {
   }
 }
 
+function startOrResumeGame(mode: GameMode) {
+  const saved = Save.loadGame(mode);
+  if (saved) {
+    startGame(mode, saved.inventory);
+    return;
+  }
+  startGame(mode);
+}
+
 /**
  * 初始化游戏引擎
  * @param mode 游戏模式
  * @param savedInventory 存档的背包数据
  */
 function startGame(mode: GameMode, savedInventory?: Record<string, number>) {
+  cleanupCurrentGame();
   gameStarted = true;
   if (instructions) instructions.style.display = 'none';
 
@@ -230,9 +245,9 @@ function startGame(mode: GameMode, savedInventory?: Record<string, number>) {
     if (btnDescend) btnDescend.style.display = mode === 'creative' ? 'flex' : 'none';
 
     document.body.classList.add('playing');
-    setupMobileControls();
+    mobileCleanup = setupMobileControls();
   } else {
-    setupDesktopControls();
+    desktopCleanup = setupDesktopControls();
     // 启动时立即请求指针锁定
     player.controls.lock();
   }
@@ -256,12 +271,12 @@ function startGame(mode: GameMode, savedInventory?: Record<string, number>) {
   updateUI();
 
   // 自动保存定时器 (每 10 秒)
-  setInterval(() => {
+  autoSaveTimer = window.setInterval(() => {
     Save.saveGame(mode, inventory);
   }, 10000);
 
   // 启动渲染循环
-  animate();
+  animationFrameId = requestAnimationFrame(animate);
 }
 
 /**
@@ -299,35 +314,46 @@ function updateHotbar(activeIndex: number) {
  */
 function setupDesktopControls() {
   // 延迟监听点击，避免捕获“开始游戏”的点击
-  setTimeout(() => {
-    document.addEventListener('click', () => {
-      if (gameStarted && !player.controls.isLocked) player.controls.lock();
-    });
-  }, 100);
-
-  player.controls.addEventListener('lock', () => {
+  const onClick = () => {
+    if (gameStarted && !player.controls.isLocked) player.controls.lock();
+  };
+  const onLock = () => {
     document.body.classList.add('playing');
     if (instructions) instructions.style.display = 'none';
-  });
-
-  player.controls.addEventListener('unlock', () => {
+  };
+  const onUnlock = () => {
     document.body.classList.remove('playing');
     if (instructions) instructions.style.display = 'flex';
-  });
-
-  document.addEventListener('keydown', (e) => {
+  };
+  const onKeyDown = (e: KeyboardEvent) => {
     const idx = parseInt(e.key) - 1;
     if (idx >= 0 && idx < slotBlockTypes.length) {
       interaction.setBlockType(slotBlockTypes[idx]);
       updateHotbar(idx);
     }
-  });
+  };
+
+  const clickTimer = window.setTimeout(() => {
+    document.addEventListener('click', onClick);
+  }, 100);
+  player.controls.addEventListener('lock', onLock);
+  player.controls.addEventListener('unlock', onUnlock);
+  document.addEventListener('keydown', onKeyDown);
+
+  return () => {
+    window.clearTimeout(clickTimer);
+    document.removeEventListener('click', onClick);
+    player.controls.removeEventListener('lock', onLock);
+    player.controls.removeEventListener('unlock', onUnlock);
+    document.removeEventListener('keydown', onKeyDown);
+  };
 }
 
 /**
  * 设置移动端控制逻辑 (虚拟摇杆/触摸)
  */
 function setupMobileControls() {
+  const cleanups: Array<() => void> = [];
   const joystickZone = document.getElementById('joystick-zone');
   if (joystickZone) {
     const manager: any = nipplejs.create({
@@ -342,65 +368,105 @@ function setupMobileControls() {
     manager.on('end', () => {
       player.joystickVector.set(0, 0);
     });
+    cleanups.push(() => manager.destroy());
   }
 
   const lookZone = document.getElementById('touch-look-zone');
   let lastX = 0, lastY = 0;
-  lookZone?.addEventListener('touchstart', (e) => {
+  const onLookStart = (e: TouchEvent) => {
     lastX = e.touches[0].clientX;
     lastY = e.touches[0].clientY;
-  });
-  lookZone?.addEventListener('touchmove', (e) => {
+  };
+  const onLookMove = (e: TouchEvent) => {
     e.preventDefault();
     const dx = e.touches[0].clientX - lastX;
     const dy = e.touches[0].clientY - lastY;
     player.rotateCamera(dx, dy);
     lastX = e.touches[0].clientX;
     lastY = e.touches[0].clientY;
-  });
+  };
+  lookZone?.addEventListener('touchstart', onLookStart);
+  lookZone?.addEventListener('touchmove', onLookMove);
+  if (lookZone) {
+    cleanups.push(() => {
+      lookZone.removeEventListener('touchstart', onLookStart);
+      lookZone.removeEventListener('touchmove', onLookMove);
+    });
+  }
 
-  document.getElementById('btn-fly')?.addEventListener('touchstart', (e) => { e.preventDefault(); player.toggleFlight(); });
+  const btnFly = document.getElementById('btn-fly');
+  const onFly = (e: TouchEvent) => { e.preventDefault(); player.toggleFlight(); };
+  btnFly?.addEventListener('touchstart', onFly);
+  if (btnFly) cleanups.push(() => btnFly.removeEventListener('touchstart', onFly));
 
   const jumpBtn = document.getElementById('btn-jump');
-  jumpBtn?.addEventListener('touchstart', (e) => {
+  const onJumpStart = (e: TouchEvent) => {
     e.preventDefault();
     if (player.isFlying) player.flyUp = true;
     else player.jump();
-  });
-  jumpBtn?.addEventListener('touchend', (e) => {
+  };
+  const onJumpEnd = (e: TouchEvent) => {
     e.preventDefault();
     player.flyUp = false;
+  };
+  jumpBtn?.addEventListener('touchstart', onJumpStart);
+  jumpBtn?.addEventListener('touchend', onJumpEnd);
+  if (jumpBtn) cleanups.push(() => {
+    jumpBtn.removeEventListener('touchstart', onJumpStart);
+    jumpBtn.removeEventListener('touchend', onJumpEnd);
   });
 
   const descendBtn = document.getElementById('btn-descend');
-  descendBtn?.addEventListener('touchstart', (e) => {
+  const onDescendStart = (e: TouchEvent) => {
     e.preventDefault();
     player.flyDown = true;
-  });
-  descendBtn?.addEventListener('touchend', (e) => {
+  };
+  const onDescendEnd = (e: TouchEvent) => {
     e.preventDefault();
     player.flyDown = false;
+  };
+  descendBtn?.addEventListener('touchstart', onDescendStart);
+  descendBtn?.addEventListener('touchend', onDescendEnd);
+  if (descendBtn) cleanups.push(() => {
+    descendBtn.removeEventListener('touchstart', onDescendStart);
+    descendBtn.removeEventListener('touchend', onDescendEnd);
   });
 
-  document.getElementById('btn-break')?.addEventListener('touchstart', (e) => { e.preventDefault(); interaction.interact(false); });
-  document.getElementById('btn-place')?.addEventListener('touchstart', (e) => { e.preventDefault(); interaction.interact(true); });
+  const breakBtn = document.getElementById('btn-break');
+  const placeBtn = document.getElementById('btn-place');
+  const onBreak = (e: TouchEvent) => { e.preventDefault(); interaction.interact(false); };
+  const onPlace = (e: TouchEvent) => { e.preventDefault(); interaction.interact(true); };
+  breakBtn?.addEventListener('touchstart', onBreak);
+  placeBtn?.addEventListener('touchstart', onPlace);
+  if (breakBtn) cleanups.push(() => breakBtn.removeEventListener('touchstart', onBreak));
+  if (placeBtn) cleanups.push(() => placeBtn.removeEventListener('touchstart', onPlace));
 
   slots.forEach((slot, idx) => {
-    slot?.addEventListener('touchstart', (e) => {
+    if (!slot) return;
+    const onTouchStart = (e: TouchEvent) => {
       e.preventDefault();
       audioSystem.init(); // 初始化音频上下文（移动端限制）
       interaction.setBlockType(slotBlockTypes[idx]);
       updateHotbar(idx);
-    });
+    };
+    slot.addEventListener('touchstart', onTouchStart);
+    cleanups.push(() => slot.removeEventListener('touchstart', onTouchStart));
   });
+
+  return () => {
+    for (const cleanup of cleanups) cleanup();
+  };
 }
 
 // --- 游戏循环 ---
 const clock = new THREE.Clock();
 
 function animate() {
-  if (!gameStarted) return;
-  requestAnimationFrame(animate);
+  if (!gameStarted) {
+    animationFrameId = null;
+    return;
+  }
+  animationFrameId = requestAnimationFrame(animate);
 
   const delta = clock.getDelta();
   player.update(delta); // 更新玩家
@@ -420,6 +486,32 @@ function animate() {
   updateDebugInfo();
 
   renderer.render(scene, camera);
+}
+
+function cleanupCurrentGame() {
+  if (!gameStarted) return;
+
+  gameStarted = false;
+  if (animationFrameId !== null) {
+    cancelAnimationFrame(animationFrameId);
+    animationFrameId = null;
+  }
+  if (autoSaveTimer !== null) {
+    window.clearInterval(autoSaveTimer);
+    autoSaveTimer = null;
+  }
+
+  desktopCleanup?.();
+  desktopCleanup = null;
+  mobileCleanup?.();
+  mobileCleanup = null;
+
+  interaction?.dispose();
+  particles?.dispose();
+  for (const npc of npcs) npc.dispose();
+  npcs.length = 0;
+  player?.dispose();
+  world?.dispose();
 }
 
 const f3DebugElement = document.getElementById('f3-debug');
@@ -455,9 +547,7 @@ function updateDebugInfo() {
     }
 
     // 游戏时间
-    const totalHours = (sky.time * 24 + 6) % 24;
-    const hours = Math.floor(totalHours);
-    const minutes = Math.floor((totalHours % 1) * 60);
+    const { hours, minutes } = sky.getClockTime();
     const timeStr = `时间: ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
 
     f3DebugElement.innerText = `我的方块世界 (F3 调试)\n${xyz}\n${block}\n面向: ${facing}\n${timeStr}\n模式: ${world.mode === 'survival' ? '生存' : (world.mode === 'creative' ? '创造' : '平坦')}`;
@@ -473,4 +563,3 @@ document.addEventListener('keydown', (e) => {
     showDebug = !showDebug;
   }
 });
-

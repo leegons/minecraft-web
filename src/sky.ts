@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 // 昼夜循环常量（全天循环所需秒数）
-const DAY_LENGTH = 120; // 2 分钟为一个完整的昼夜
+const DAY_LENGTH = 1200; // 20 分钟为一个完整的昼夜，与 Minecraft 一致
 
 /**
  * 天空盒类：负责昼夜交替、太阳月亮运动、星空和动态云朵
@@ -9,8 +9,8 @@ const DAY_LENGTH = 120; // 2 分钟为一个完整的昼夜
 export class Sky {
     private scene: THREE.Scene;
 
-    private sun: THREE.Mesh;
-    private moon: THREE.Mesh;
+    private sun: THREE.Sprite;
+    private moon: THREE.Sprite;
     private clouds: THREE.Group[] = [];
     private stars: THREE.Points;
     private pivot: THREE.Object3D; // 太阳和月亮绕此中心点旋转
@@ -34,17 +34,16 @@ export class Sky {
         this.scene = scene;
 
         // --- 太阳 ---
-        const sunGeo = new THREE.PlaneGeometry(8, 8);
         const sunTex = this.makeSunTexture();
-        const sunMat = new THREE.MeshBasicMaterial({ map: sunTex, transparent: true, depthWrite: false, side: THREE.DoubleSide });
-        this.sun = new THREE.Mesh(sunGeo, sunMat);
+        const sunMat = new THREE.SpriteMaterial({ map: sunTex, transparent: true, depthWrite: false });
+        this.sun = new THREE.Sprite(sunMat);
+        this.sun.scale.set(10, 10, 1);
 
         // --- 月亮 ---
-        const moonGeo = new THREE.PlaneGeometry(6, 6);
         const moonTex = this.makeMoonTexture();
-        const moonMat = new THREE.MeshBasicMaterial({ map: moonTex, transparent: true, depthWrite: false, side: THREE.DoubleSide });
-        this.moon = new THREE.Mesh(moonGeo, moonMat);
-        this.moon.rotation.z = 0.1;
+        const moonMat = new THREE.SpriteMaterial({ map: moonTex, transparent: true, depthWrite: false });
+        this.moon = new THREE.Sprite(moonMat);
+        this.moon.scale.set(8, 8, 1);
 
         // 轨道中心点（天体距离原点 60 个单位进行圆周运动）
         this.pivot = new THREE.Object3D();
@@ -195,13 +194,20 @@ export class Sky {
         return { sky: cols[0].sky, fog: cols[0].fog };
     }
 
+    public getClockTime() {
+        const totalHours = (this.time * 24 + 6) % 24;
+        const hours = Math.floor(totalHours);
+        const minutes = Math.floor((totalHours % 1) * 60);
+        return { hours, minutes };
+    }
+
     /** 每帧更新天空状态 */
     update(delta: number, playerPosition: THREE.Vector3) {
         this.time = (this.time + delta / DAY_LENGTH) % 1;
         const angle = this.time * Math.PI * 2;
 
         // 旋转太阳和月亮的轨道，并始终跟随玩家位置
-        this.pivot.rotation.z = -angle;
+        this.pivot.rotation.z = Math.PI / 2 - angle;
         this.pivot.position.copy(playerPosition);
 
         // 星星也跟随玩家移动，营造无限远的视觉感
@@ -215,10 +221,12 @@ export class Sky {
         }
 
         // 星星仅在夜晚可见（根据时间平滑改变透明度）
-        const nightFactor = this.time > 0.5 ? Math.min((this.time - 0.5) / 0.1, 1) :
-            this.time < 0.1 ? Math.max(1 - this.time / 0.1, 0) : 0;
+        const sunHeight = Math.sin(angle);
+        const nightFactor = Math.max(0, -sunHeight);
         (this.stars.material as THREE.PointsMaterial).opacity = nightFactor;
         (this.stars.material as THREE.PointsMaterial).transparent = true;
+        (this.sun.material as THREE.SpriteMaterial).opacity = Math.max(0.35, Math.max(0, sunHeight));
+        (this.moon.material as THREE.SpriteMaterial).opacity = Math.max(0.15, nightFactor);
 
         // 云朵缓慢漂移，并实现循环滚动（到达边界后重新出现在对面）
         for (const cloud of this.clouds) {
@@ -233,8 +241,7 @@ export class Sky {
         }
 
         // 根据时间计算光照强度（白天强，夜晚弱）
-        const dayPhase = Math.cos(angle); // 1 代表正午, -1 代表午夜
-        const lightIntensity = Math.max(0.05, (dayPhase + 1) / 2);
+        const lightIntensity = 0.08 + Math.max(0, sunHeight) * 0.92;
         return lightIntensity;
     }
 }

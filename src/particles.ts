@@ -18,12 +18,14 @@ interface Particle {
  * 粒子系统类：使用 InstancedMesh 高效管理大量方块碎屑粒子
  */
 export class ParticleSystem {
+    private scene: THREE.Scene;
     private mesh: THREE.InstancedMesh;
     private particles: Particle[] = [];
     private dummy = new THREE.Object3D(); // 用于矩阵变换的中间对象
     private colorCache = new THREE.Color();
 
     constructor(scene: THREE.Scene) {
+        this.scene = scene;
         // 创建极小的方块形状作为粒子原型
         const geo = new THREE.BoxGeometry(0.12, 0.12, 0.12);
         const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
@@ -145,6 +147,14 @@ export class ParticleSystem {
             if (this.mesh.instanceColor) {
                 this.mesh.instanceColor.needsUpdate = true;
             }
+        }
+    }
+
+    public dispose() {
+        this.scene.remove(this.mesh);
+        this.mesh.geometry.dispose();
+        if (this.mesh.material instanceof THREE.Material) {
+            this.mesh.material.dispose();
         }
     }
 }
