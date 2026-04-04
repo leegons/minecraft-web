@@ -8,21 +8,75 @@ const PREFIX = 'mc_';
 const CHUNK_PREFIX = PREFIX + 'chunk_'; // 区块数据前缀
 const MODIFIED_KEY = PREFIX + 'modified_chunks'; // 已修改区块的索引键
 const GAME_KEY = PREFIX + 'game'; // 游戏模式和背包数据键
+const LAST_PLAYED_KEY = PREFIX + 'last_played';
+const MODES: GameMode[] = ['creative', 'flat', 'survival'];
 
 interface SaveData {
     mode: GameMode;
     inventory: Record<string, number>;
 }
 
+const pendingChunks: Map<string, Uint8Array> = new Map();
+let flushTimer: number | null = null;
+const SAVE_FLUSH_DELAY_MS = 300;
+
 /** 
  * 追踪哪些区块被玩家修改过（只保存被修改的区块以节省空间）
  */
-const modifiedChunks: Set<string> = new Set(
-    JSON.parse(localStorage.getItem(MODIFIED_KEY) ?? '[]')
-);
+const modifiedChunksByMode = new Map<GameMode, Set<string>>();
+
+for (const mode of MODES) {
+    modifiedChunksByMode.set(mode, new Set(loadStoredArray(modeKey(MODIFIED_KEY, mode))));
+}
 
 function chunkKey(cx: number, cz: number) {
     return `${cx}_${cz}`;
+}
+
+function modeKey(base: string, mode: GameMode) {
+    return `${base}_${mode}`;
+}
+
+function chunkStorageKey(mode: GameMode, chunkId: string) {
+    return `${modeKey(CHUNK_PREFIX, mode)}_${chunkId}`;
+}
+
+function loadStoredArray(key: string): string[] {
+    try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) as string[] : [];
+    } catch {
+        return [];
+    }
+}
+
+function getModifiedChunks(mode: GameMode): Set<string> {
+    let chunks = modifiedChunksByMode.get(mode);
+    if (!chunks) {
+        chunks = new Set();
+        modifiedChunksByMode.set(mode, chunks);
+    }
+    return chunks;
+}
+
+function scheduleFlush() {
+    if (flushTimer !== null) return;
+    flushTimer = window.setTimeout(() => {
+        flushTimer = null;
+        flushPendingChunks();
+    }, SAVE_FLUSH_DELAY_MS);
+}
+
+function flushPendingChunks() {
+    if (pendingChunks.size === 0) return;
+
+    for (const mode of MODES) {
+        localStorage.setItem(modeKey(MODIFIED_KEY, mode), JSON.stringify([...getModifiedChunks(mode)]));
+    }
+    for (const [key, data] of pendingChunks) {
+        localStorage.setItem(key, uint8ToBase64(data));
+    }
+    pendingChunks.clear();
 }
 
 /**
@@ -32,20 +86,18 @@ export const Save = {
     /**
      * 保存区块数据：由玩家手动修改方块时触发
      */
-    saveChunk(cx: number, cz: number, data: Uint8Array) {
+    saveChunk(mode: GameMode, cx: number, cz: number, data: Uint8Array) {
         const key = chunkKey(cx, cz);
-        modifiedChunks.add(key);
-        // 保存已被修改区块的列表
-        localStorage.setItem(MODIFIED_KEY, JSON.stringify([...modifiedChunks]));
-        // 区块数据使用 Base64 编码后存储为字符串，以提高存储密度
-        localStorage.setItem(CHUNK_PREFIX + key, uint8ToBase64(data));
+        getModifiedChunks(mode).add(key);
+        pendingChunks.set(chunkStorageKey(mode, key), data.slice());
+        scheduleFlush();
     },
 
     /**
      * 读取指定坐标的区块存档数据
      */
-    loadChunk(cx: number, cz: number): Uint8Array | null {
-        const raw = localStorage.getItem(CHUNK_PREFIX + chunkKey(cx, cz));
+    loadChunk(mode: GameMode, cx: number, cz: number): Uint8Array | null {
+        const raw = localStorage.getItem(chunkStorageKey(mode, chunkKey(cx, cz)));
         if (!raw) return null;
         return base64ToUint8(raw);
     },
@@ -55,33 +107,75 @@ export const Save = {
      */
     saveGame(mode: GameMode, inventory: Inventory) {
         const data: SaveData = { mode, inventory: inventory.toJSON() };
-        localStorage.setItem(GAME_KEY, JSON.stringify(data));
+        localStorage.setItem(modeKey(GAME_KEY, mode), JSON.stringify(data));
+        localStorage.setItem(LAST_PLAYED_KEY, mode);
     },
 
     /**
      * 读取全局游戏状态
      */
-    loadGame(): SaveData | null {
-        const raw = localStorage.getItem(GAME_KEY);
+    loadGame(mode: GameMode): SaveData | null {
+        const raw = localStorage.getItem(modeKey(GAME_KEY, mode));
         if (!raw) return null;
         try { return JSON.parse(raw) as SaveData; } catch { return null; }
+    },
+
+    loadLatestGame(): SaveData | null {
+        const lastPlayed = localStorage.getItem(LAST_PLAYED_KEY) as GameMode | null;
+        if (lastPlayed && this.hasSave(lastPlayed)) {
+            return this.loadGame(lastPlayed);
+        }
+
+        for (const mode of MODES) {
+            if (this.hasSave(mode)) {
+                return this.loadGame(mode);
+            }
+        }
+
+        return null;
     },
 
     /**
      * 清除所有存档数据（用于重置游戏）
      */
     clearAll() {
-        for (const key of modifiedChunks) {
-            localStorage.removeItem(CHUNK_PREFIX + key);
+        if (flushTimer !== null) {
+            window.clearTimeout(flushTimer);
+            flushTimer = null;
         }
-        modifiedChunks.clear();
+        pendingChunks.clear();
+        for (const mode of MODES) {
+            for (const key of getModifiedChunks(mode)) {
+                localStorage.removeItem(chunkStorageKey(mode, key));
+            }
+            getModifiedChunks(mode).clear();
+            localStorage.removeItem(modeKey(MODIFIED_KEY, mode));
+            localStorage.removeItem(modeKey(GAME_KEY, mode));
+        }
+        localStorage.removeItem(LAST_PLAYED_KEY);
         localStorage.removeItem(MODIFIED_KEY);
         localStorage.removeItem(GAME_KEY);
     },
 
     /** 检查是否存在有效存档 */
-    hasSave(): boolean {
-        return !!localStorage.getItem(GAME_KEY);
+    hasSave(mode: GameMode): boolean {
+        return !!localStorage.getItem(modeKey(GAME_KEY, mode));
+    },
+
+    hasAnySave(): boolean {
+        return MODES.some((mode) => this.hasSave(mode));
+    },
+
+    isChunkModified(mode: GameMode, cx: number, cz: number): boolean {
+        return getModifiedChunks(mode).has(chunkKey(cx, cz));
+    },
+
+    flushPending() {
+        if (flushTimer !== null) {
+            window.clearTimeout(flushTimer);
+            flushTimer = null;
+        }
+        flushPendingChunks();
     }
 };
 
@@ -90,7 +184,10 @@ export const Save = {
  */
 function uint8ToBase64(buf: Uint8Array): string {
     let binary = '';
-    for (let i = 0; i < buf.length; i++) binary += String.fromCharCode(buf[i]);
+    const chunkSize = 0x8000;
+    for (let i = 0; i < buf.length; i += chunkSize) {
+        binary += String.fromCharCode(...buf.subarray(i, i + chunkSize));
+    }
     return btoa(binary);
 }
 
@@ -103,5 +200,13 @@ function base64ToUint8(str: string): Uint8Array {
     for (let i = 0; i < binary.length; i++) buf[i] = binary.charCodeAt(i);
     return buf;
 }
+
+window.addEventListener('pagehide', () => {
+    Save.flushPending();
+});
+
+window.addEventListener('beforeunload', () => {
+    Save.flushPending();
+});
 
 export type { GameMode };

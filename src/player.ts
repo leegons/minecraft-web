@@ -47,25 +47,15 @@ export class Player {
 
     // 移动端标志
     public isMobile = false;
+    private readonly onKeyDown: (event: KeyboardEvent) => void;
+    private readonly onKeyUp: (event: KeyboardEvent) => void;
 
     constructor(camera: THREE.PerspectiveCamera, domElement: HTMLElement, world: World, mode: GameMode = 'creative') {
         this.camera = camera;
         this.world = world;
         this.gameMode = mode;
         this.controls = new PointerLockControls(camera, domElement);
-
-        // 设置生成高度，平坦模式较低，普通模式较高
-        const spawnY = mode === 'flat' ? 8 : 30;
-        this.camera.position.set(0, spawnY, 0);
-
-        this.setupEventListeners();
-    }
-
-    /**
-     * 设置键盘监听事件
-     */
-    private setupEventListeners() {
-        const onKeyDown = (event: KeyboardEvent) => {
+        this.onKeyDown = (event: KeyboardEvent) => {
             switch (event.code) {
                 case 'ArrowUp':
                 case 'KeyW':
@@ -112,8 +102,7 @@ export class Player {
                     break;
             }
         };
-
-        const onKeyUp = (event: KeyboardEvent) => {
+        this.onKeyUp = (event: KeyboardEvent) => {
             switch (event.code) {
                 case 'ArrowUp':
                 case 'KeyW':
@@ -141,8 +130,19 @@ export class Player {
             }
         };
 
-        document.addEventListener('keydown', onKeyDown);
-        document.addEventListener('keyup', onKeyUp);
+        // 设置生成高度，平坦模式较低，普通模式较高
+        const spawnY = mode === 'flat' ? 8 : 30;
+        this.camera.position.set(0, spawnY, 0);
+
+        this.setupEventListeners();
+    }
+
+    /**
+     * 设置键盘监听事件
+     */
+    private setupEventListeners() {
+        document.addEventListener('keydown', this.onKeyDown);
+        document.addEventListener('keyup', this.onKeyUp);
     }
 
     /**
@@ -321,6 +321,14 @@ export class Player {
         } else if (this.canJump) {
             this.velocity.y = this.jumpForce;
             this.canJump = false;
+        }
+    }
+
+    public dispose() {
+        document.removeEventListener('keydown', this.onKeyDown);
+        document.removeEventListener('keyup', this.onKeyUp);
+        if (this.controls.isLocked) {
+            this.controls.unlock();
         }
     }
 }

@@ -8,6 +8,12 @@ import { CHUNK_SIZE, CHUNK_HEIGHT, BLOCK_SIZE, BlockType } from './constants';
 import type { GameMode } from './constants';
 export { CHUNK_SIZE, CHUNK_HEIGHT, BLOCK_SIZE, BlockType };
 
+export interface WorldRaycastHit {
+    block: THREE.Vector3;
+    normal: THREE.Vector3;
+    type: BlockType;
+}
+
 export class World {
     public scene: THREE.Scene;
     private noise2D: (x: number, y: number) => number;
@@ -32,6 +38,10 @@ export class World {
     private playerChunkZ = 0;
     private generateQueue: Array<[number, number]> = [];
     private meshQueue: Array<[number, number]> = [];
+    private generateQueueKeys: Set<string> = new Set();
+    private meshQueueKeys: Set<string> = new Set();
+    private collidableMeshes: THREE.Object3D[] = [];
+    private collidableMeshesDirty = true;
 
     // 海平面常量
     private readonly SEA_LEVEL = 14;
@@ -93,8 +103,13 @@ export class World {
         toLoad.sort((a, b) => a[2] - b[2]);
 
         // 重置生成队列
-        this.generateQueue = toLoad.map(([x, z]) => [x, z]);
+        this.generateQueue = [];
+        this.generateQueueKeys.clear();
+        for (const [x, z] of toLoad) {
+            this.enqueueGenerate(x, z);
+        }
         this.meshQueue = [];
+        this.meshQueueKeys.clear();
     }
 
     /**
@@ -104,6 +119,7 @@ export class World {
         let generatedCount = 0;
         while (this.generateQueue.length > 0 && generatedCount < this.CHUNKS_PER_FRAME) {
             const [qx, qz] = this.generateQueue.shift()!;
+            this.generateQueueKeys.delete(this.getChunkKey(qx, qz));
             if (!this.chunks.has(this.getChunkKey(qx, qz))) {
                 this.generateChunk(qx, qz);
                 // 区块生成后，需要重新构建自身及邻居的网格（解决接缝处的遮挡关系）
@@ -111,10 +127,7 @@ export class World {
                     for (let dz = -1; dz <= 1; dz++) {
                         const nKey = this.getChunkKey(qx + dx, qz + dz);
                         if (this.chunks.has(nKey)) {
-                            const entry: [number, number] = [qx + dx, qz + dz];
-                            if (!this.meshQueue.some(([mx, mz]) => mx === entry[0] && mz === entry[1])) {
-                                this.meshQueue.push(entry);
-                            }
+                            this.enqueueMesh(qx + dx, qz + dz);
                         }
                     }
                 }
@@ -125,11 +138,30 @@ export class World {
         let meshedCount = 0;
         while (this.meshQueue.length > 0 && meshedCount < this.CHUNKS_PER_FRAME) {
             const [qx, qz] = this.meshQueue.shift()!;
+            this.meshQueueKeys.delete(this.getChunkKey(qx, qz));
             if (this.chunks.has(this.getChunkKey(qx, qz))) {
                 this.buildChunkMesh(qx, qz);
             }
             meshedCount++;
         }
+    }
+
+    private enqueueGenerate(cx: number, cz: number) {
+        const key = this.getChunkKey(cx, cz);
+        if (this.generateQueueKeys.has(key) || this.chunks.has(key)) return;
+        this.generateQueue.push([cx, cz]);
+        this.generateQueueKeys.add(key);
+    }
+
+    private enqueueMesh(cx: number, cz: number) {
+        const key = this.getChunkKey(cx, cz);
+        if (this.meshQueueKeys.has(key) || !this.chunks.has(key)) return;
+        this.meshQueue.push([cx, cz]);
+        this.meshQueueKeys.add(key);
+    }
+
+    private markCollidableMeshesDirty() {
+        this.collidableMeshesDirty = true;
     }
 
     private unloadChunk(cx: number, cz: number) {
@@ -140,6 +172,7 @@ export class World {
             this.scene.remove(mesh);
             mesh.geometry.dispose();
             this.chunkMeshes.delete(key);
+            this.markCollidableMeshesDirty();
         }
 
         const floraMap = this.floraMeshes.get(key);
@@ -149,6 +182,7 @@ export class World {
                 m.dispose();
             }
             this.floraMeshes.delete(key);
+            this.markCollidableMeshesDirty();
         }
 
         const waterMesh = this.waterMeshes.get(key);
@@ -157,9 +191,12 @@ export class World {
             waterMesh.geometry.dispose();
             if (waterMesh.material instanceof THREE.Material) waterMesh.material.dispose();
             this.waterMeshes.delete(key);
+            this.markCollidableMeshesDirty();
         }
 
-        // Keep chunk data for block modification persistence
+        if (!Save.isChunkModified(this.mode, cx, cz)) {
+            this.chunks.delete(key);
+        }
     }
 
     private initMaterials() {
@@ -198,7 +235,7 @@ export class World {
 
     private generateChunk(cx: number, cz: number) {
         // 首先尝试从本地存储加载
-        const saved = Save.loadChunk(cx, cz);
+        const saved = Save.loadChunk(this.mode, cx, cz);
         if (saved) {
             const key = this.getChunkKey(cx, cz);
             this.chunks.set(key, saved);
@@ -406,7 +443,6 @@ export class World {
         };
 
         const floraCounts = new Map<BlockType, number>();
-        let waterFaceCount = 0;
 
         // AO 亮度曲线：遮挡越严重颜色越暗
         const aoCurve = [0.4, 0.6, 0.8, 1.0];
@@ -465,7 +501,6 @@ export class World {
                                         waterColorArr.push(wc.r, wc.g, wc.b);
                                     }
                                     waterIndices.push(vOffset, vOffset + 1, vOffset + 2, vOffset, vOffset + 2, vOffset + 3);
-                                    waterFaceCount++;
                                 }
                             }
                         } else if (blockType === BlockType.TALL_GRASS || blockType === BlockType.FLOWER) {
@@ -563,6 +598,8 @@ export class World {
             mesh.receiveShadow = false;
             this.scene.add(mesh);
             this.chunkMeshes.set(key, mesh);
+        } else {
+            this.chunkMeshes.delete(key);
         }
 
         // 构建植被实例化网格 (Flora Instanced Mesh)
@@ -644,18 +681,25 @@ export class World {
             waterMesh = new THREE.Mesh(waterGeometry, mergedWaterMat);
             this.scene.add(waterMesh);
             this.waterMeshes.set(key, waterMesh);
+        } else {
+            this.waterMeshes.delete(key);
         }
+
+        this.markCollidableMeshesDirty();
     }
 
     /**
      * 获取当前所有活动的网格对象
      */
     public getMeshes(): THREE.Object3D[] {
-        const flatMeshes: THREE.Object3D[] = [];
-        for (const mesh of this.chunkMeshes.values()) flatMeshes.push(mesh);
-        for (const map of this.floraMeshes.values()) flatMeshes.push(...Array.from(map.values()));
-        for (const mesh of this.waterMeshes.values()) flatMeshes.push(mesh);
-        return flatMeshes;
+        if (this.collidableMeshesDirty) {
+            this.collidableMeshes = [];
+            for (const mesh of this.chunkMeshes.values()) this.collidableMeshes.push(mesh);
+            for (const map of this.floraMeshes.values()) this.collidableMeshes.push(...Array.from(map.values()));
+            for (const mesh of this.waterMeshes.values()) this.collidableMeshes.push(mesh);
+            this.collidableMeshesDirty = false;
+        }
+        return this.collidableMeshes;
     }
 
     /**
@@ -675,6 +719,79 @@ export class World {
         return chunk[this.getBlockIndex(x, y, z)] as BlockType;
     }
 
+    public raycast(origin: THREE.Vector3, direction: THREE.Vector3, maxDistance: number): WorldRaycastHit | null {
+        if (direction.lengthSq() === 0) return null;
+
+        // Shift by half a block so voxel cells map cleanly to integer-centered blocks.
+        let x = origin.x + 0.5;
+        let y = origin.y + 0.5;
+        let z = origin.z + 0.5;
+
+        let voxelX = Math.floor(x);
+        let voxelY = Math.floor(y);
+        let voxelZ = Math.floor(z);
+
+        const stepX = Math.sign(direction.x);
+        const stepY = Math.sign(direction.y);
+        const stepZ = Math.sign(direction.z);
+
+        const invDx = direction.x !== 0 ? Math.abs(1 / direction.x) : Number.POSITIVE_INFINITY;
+        const invDy = direction.y !== 0 ? Math.abs(1 / direction.y) : Number.POSITIVE_INFINITY;
+        const invDz = direction.z !== 0 ? Math.abs(1 / direction.z) : Number.POSITIVE_INFINITY;
+
+        let tMaxX = stepX !== 0
+            ? ((stepX > 0 ? voxelX + 1 : voxelX) - x) / direction.x
+            : Number.POSITIVE_INFINITY;
+        let tMaxY = stepY !== 0
+            ? ((stepY > 0 ? voxelY + 1 : voxelY) - y) / direction.y
+            : Number.POSITIVE_INFINITY;
+        let tMaxZ = stepZ !== 0
+            ? ((stepZ > 0 ? voxelZ + 1 : voxelZ) - z) / direction.z
+            : Number.POSITIVE_INFINITY;
+
+        let distance = 0;
+        const normal = new THREE.Vector3();
+
+        while (distance <= maxDistance) {
+            const type = this.getBlock(voxelX, voxelY, voxelZ);
+            if (type !== BlockType.AIR) {
+                return {
+                    block: new THREE.Vector3(voxelX, voxelY, voxelZ),
+                    normal: normal.clone(),
+                    type,
+                };
+            }
+
+            if (tMaxX < tMaxY) {
+                if (tMaxX < tMaxZ) {
+                    voxelX += stepX;
+                    distance = tMaxX;
+                    tMaxX += invDx;
+                    normal.set(-stepX, 0, 0);
+                } else {
+                    voxelZ += stepZ;
+                    distance = tMaxZ;
+                    tMaxZ += invDz;
+                    normal.set(0, 0, -stepZ);
+                }
+            } else {
+                if (tMaxY < tMaxZ) {
+                    voxelY += stepY;
+                    distance = tMaxY;
+                    tMaxY += invDy;
+                    normal.set(0, -stepY, 0);
+                } else {
+                    voxelZ += stepZ;
+                    distance = tMaxZ;
+                    tMaxZ += invDz;
+                    normal.set(0, 0, -stepZ);
+                }
+            }
+        }
+
+        return null;
+    }
+
     /**
      * 修改指定全局世界坐标处的方块，并触发周围区块重绘
      */
@@ -691,14 +808,29 @@ export class World {
 
         if (chunk) {
             chunk[this.getBlockIndex(x, y, z)] = type;
-            Save.saveChunk(cx, cz, chunk); // 立即保存到本地
-            this.buildChunkMesh(cx, cz); // 重绘当前区块
+            Save.saveChunk(this.mode, cx, cz, chunk);
+            this.enqueueMesh(cx, cz);
 
             // 如果修改的是区块边界方块，需要重绘相邻区块以防出现空隙（主要是 AO 阴影需要更新）
-            if (x === 0) this.buildChunkMesh(cx - 1, cz);
-            if (x === CHUNK_SIZE - 1) this.buildChunkMesh(cx + 1, cz);
-            if (z === 0) this.buildChunkMesh(cx, cz - 1);
-            if (z === CHUNK_SIZE - 1) this.buildChunkMesh(cx, cz + 1);
+            if (x === 0) this.enqueueMesh(cx - 1, cz);
+            if (x === CHUNK_SIZE - 1) this.enqueueMesh(cx + 1, cz);
+            if (z === 0) this.enqueueMesh(cx, cz - 1);
+            if (z === CHUNK_SIZE - 1) this.enqueueMesh(cx, cz + 1);
         }
+    }
+
+    public dispose() {
+        this.generateQueue = [];
+        this.meshQueue = [];
+        this.generateQueueKeys.clear();
+        this.meshQueueKeys.clear();
+
+        for (const key of Array.from(this.chunkMeshes.keys())) {
+            const [cx, cz] = key.split(',').map(Number);
+            this.unloadChunk(cx, cz);
+        }
+        this.chunks.clear();
+        this.collidableMeshes = [];
+        this.markCollidableMeshesDirty();
     }
 }
