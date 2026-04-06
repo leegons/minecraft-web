@@ -50,6 +50,12 @@ export class Player {
     private readonly onKeyDown: (event: KeyboardEvent) => void;
     private readonly onKeyUp: (event: KeyboardEvent) => void;
 
+    // 预分配的向量，避免每帧 new 导致 GC 压力
+    private readonly _right = new THREE.Vector3();
+    private readonly _forward = new THREE.Vector3();
+    private readonly _originalPos = new THREE.Vector3();
+    private readonly _groundCheckPos = new THREE.Vector3();
+
     constructor(camera: THREE.PerspectiveCamera, domElement: HTMLElement, world: World, mode: GameMode = 'creative') {
         this.camera = camera;
         this.world = world;
@@ -191,9 +197,9 @@ export class Player {
      */
     private checkGrounded(): boolean {
         if (this.isFlying) return false;
-        const pos = this.camera.position.clone();
-        pos.y -= 0.1;
-        return this.checkCollision(pos);
+        this._groundCheckPos.copy(this.camera.position);
+        this._groundCheckPos.y -= 0.1;
+        return this.checkCollision(this._groundCheckPos);
     }
 
     /**
@@ -246,42 +252,39 @@ export class Player {
             this.velocity.x -= this.direction.x * currentSpeed * delta;
 
         const pos = this.camera.position;
-        const originalPos = pos.clone();
+        this._originalPos.copy(pos);
 
         // 提取摄像机的本地坐标轴向量（右侧和前方）
-        const right = new THREE.Vector3();
-        const forward = new THREE.Vector3();
+        this.camera.getWorldDirection(this._forward);
+        this._forward.y = 0; // 锁定水平移动，抬头或低头时不改变垂直速度
+        this._forward.normalize();
 
-        this.camera.getWorldDirection(forward);
-        forward.y = 0; // 锁定水平移动，抬头或低头时不改变垂直速度
-        forward.normalize();
-
-        right.crossVectors(forward, this.camera.up).normalize();
+        this._right.crossVectors(this._forward, this.camera.up).normalize();
 
         // 根据速度计算目标位移量
-        const dx = right.x * (-this.velocity.x * delta) + forward.x * (-this.velocity.z * delta);
-        const dz = right.z * (-this.velocity.x * delta) + forward.z * (-this.velocity.z * delta);
+        const dx = this._right.x * (-this.velocity.x * delta) + this._forward.x * (-this.velocity.z * delta);
+        const dz = this._right.z * (-this.velocity.x * delta) + this._forward.z * (-this.velocity.z * delta);
         const dy = this.velocity.y * delta;
 
         // 分别在三个轴向上进行碰撞测试，实现顺滑的贴墙滑动
         // X 轴测试
         pos.x += dx;
         if (this.checkCollision(pos)) {
-            pos.x = originalPos.x;
+            pos.x = this._originalPos.x;
             this.velocity.x = 0;
         }
 
         // Z 轴测试
         pos.z += dz;
         if (this.checkCollision(pos)) {
-            pos.z = originalPos.z;
+            pos.z = this._originalPos.z;
             this.velocity.z = 0;
         }
 
         // Y 轴测试 (非飞行模式)
         pos.y += dy;
         if (!this.isFlying && this.checkCollision(pos)) {
-            pos.y = originalPos.y;
+            pos.y = this._originalPos.y;
             this.velocity.y = 0;
             this.canJump = true;
         }

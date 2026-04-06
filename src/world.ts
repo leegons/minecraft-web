@@ -464,6 +464,8 @@ export class World {
         const waterPositions: number[] = [];
         const waterIndices: number[] = [];
         const waterColorArr: number[] = [];
+        // 预分配水体颜色，避免在每个水方块的循环中重复 new THREE.Color()
+        const waterColor = new THREE.Color(0x3366ff);
 
         // 遍历区块内的每个坐标点
         for (let x = 0; x < CHUNK_SIZE; x++) {
@@ -478,7 +480,6 @@ export class World {
 
                         if (blockType === BlockType.WATER) {
                             // 水体渲染逻辑：只渲染暴露在外的面
-                            const wc = new THREE.Color(0x3366ff);
                             const hw = BLOCK_SIZE / 2;
 
                             for (let f = 0; f < 6; f++) {
@@ -498,7 +499,7 @@ export class World {
                                             wy * BLOCK_SIZE + corner[1] * hw + yOffset,
                                             wz * BLOCK_SIZE + corner[2] * hw
                                         );
-                                        waterColorArr.push(wc.r, wc.g, wc.b);
+                                        waterColorArr.push(waterColor.r, waterColor.g, waterColor.b);
                                     }
                                     waterIndices.push(vOffset, vOffset + 1, vOffset + 2, vOffset, vOffset + 2, vOffset + 3);
                                 }
