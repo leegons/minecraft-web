@@ -150,8 +150,14 @@ export class Interaction {
 
     /**
      * 每帧更新：计算光标位置选中的方块并显示轮廓
+     * 桌面端仅在指针已锁定时执行射线检测，避免无效计算
      */
     public update() {
+        if (!this.player.isMobile && !this.player.controls.isLocked) {
+            this.outlineMesh.visible = false;
+            return;
+        }
+
         const hit = this.getTargetBlock();
         if (hit && hit.type !== BlockType.AIR) {
             this.outlineMesh.position.copy(hit.block);

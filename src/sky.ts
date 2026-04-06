@@ -17,6 +17,10 @@ export class Sky {
 
     public time = 0; // 0..1 代表一天的时间 (0=黎明, 0.25=正午, 0.5=黄昏, 0.75=午夜)
 
+    // 预分配颜色对象，避免每帧 new THREE.Color() 导致 GC 压力
+    private readonly _bgColor = new THREE.Color();
+    private readonly _fogColor = new THREE.Color();
+
     // 不同时间点对应的天空和雾效颜色
     private readonly SKY_COLORS = [
         { t: 0.00, sky: 0xffa07a, fog: 0xff8c69 }, // 黎明
@@ -215,9 +219,11 @@ export class Sky {
 
         // 更新背景颜色和雾效
         const { sky, fog } = this.getSkyFog();
-        this.scene.background = new THREE.Color(sky);
-        if ((this.scene as any).fog) {
-            (this.scene.fog as THREE.Fog).color.setHex(fog);
+        this._bgColor.setHex(sky);
+        this.scene.background = this._bgColor;
+        if (this.scene.fog instanceof THREE.Fog) {
+            this._fogColor.setHex(fog);
+            this.scene.fog.color.copy(this._fogColor);
         }
 
         // 星星仅在夜晚可见（根据时间平滑改变透明度）

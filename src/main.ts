@@ -153,25 +153,7 @@ function updateLanguage(lang: string) {
       `;
     }
     
-    // 更新 F3 调试面板的语言
-    const debugElement = document.getElementById('f3-debug');
-    if (debugElement && showDebug) {
-      const text = debugElement.innerText;
-      const updatedText = text
-        .replace('我的方块世界 (F3 调试)', 'Block World (F3 Debug)')
-        .replace('坐标:', 'Coordinates:')
-        .replace('方块:', 'Block:')
-        .replace('面向:', 'Facing:')
-        .replace('时间:', 'Time:')
-        .replace('东 (+X)', 'East (+X)')
-        .replace('西 (-X)', 'West (-X)')
-        .replace('南 (+Z)', 'South (+Z)')
-        .replace('北 (-Z)', 'North (-Z)')
-        .replace('生存', 'Survival')
-        .replace('创造', 'Creative')
-        .replace('平坦', 'Flat');
-      debugElement.innerText = updatedText;
-    }
+    // F3 调试面板会在下一帧通过 updateDebugInfo() 刷新，无需手动翻译文本
   } else {
     // 中文模式 - 恢复原始文本
     if (btnContinue) btnContinue.textContent = '继续游戏';
@@ -194,8 +176,8 @@ function updateLanguage(lang: string) {
       `;
     }
     
-    // 恢复 F3 调试面板的中文
-    updateDebugInfo(); // 重新生成调试信息
+    // 如果面板正在显示，立即刷新为中文内容
+    if (showDebug) updateDebugInfo();
   }
 }
 
@@ -482,8 +464,8 @@ function animate() {
   interaction.update(); // 更新交互指示器
   world.update(camera.position); // 动态更新世界块加载
 
-  // 更新 F3 调试面板
-  updateDebugInfo();
+  // 仅在调试面板开启时才更新（避免每帧无效计算）
+  if (showDebug) updateDebugInfo();
 
   renderer.render(scene, camera);
 }
@@ -516,44 +498,39 @@ function cleanupCurrentGame() {
 
 const f3DebugElement = document.getElementById('f3-debug');
 let showDebug = false;
+// 预分配方向向量，避免调试面板每帧 new THREE.Vector3()
+const _debugDirection = new THREE.Vector3();
 
 /**
- * 更新 F3 调试信息面板
+ * 更新 F3 调试信息面板（仅在面板可见时调用）
  */
 function updateDebugInfo() {
   if (!f3DebugElement) return;
 
-  if (showDebug) {
-    f3DebugElement.style.display = 'block';
+  // XYZ 坐标
+  const p = camera.position;
+  const xyz = `坐标: ${p.x.toFixed(3)} / ${p.y.toFixed(3)} / ${p.z.toFixed(3)}`;
 
-    // XYZ 坐标
-    const p = camera.position;
-    const xyz = `坐标: ${p.x.toFixed(3)} / ${p.y.toFixed(3)} / ${p.z.toFixed(3)}`;
+  // 方块坐标
+  const block = `方块: ${Math.floor(p.x)} ${Math.floor(p.y)} ${Math.floor(p.z)}`;
 
-    // 方块坐标
-    const block = `方块: ${Math.floor(p.x)} ${Math.floor(p.y)} ${Math.floor(p.z)}`;
+  // 面向方向（复用预分配向量）
+  camera.getWorldDirection(_debugDirection);
+  let facing = '';
+  const absX = Math.abs(_debugDirection.x);
+  const absZ = Math.abs(_debugDirection.z);
 
-    // 面向方向
-    const direction = new THREE.Vector3();
-    camera.getWorldDirection(direction);
-    let facing = '';
-    const absX = Math.abs(direction.x);
-    const absZ = Math.abs(direction.z);
-
-    if (absX > absZ) {
-      facing = direction.x > 0 ? '东 (+X)' : '西 (-X)';
-    } else {
-      facing = direction.z > 0 ? '南 (+Z)' : '北 (-Z)';
-    }
-
-    // 游戏时间
-    const { hours, minutes } = sky.getClockTime();
-    const timeStr = `时间: ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
-
-    f3DebugElement.innerText = `我的方块世界 (F3 调试)\n${xyz}\n${block}\n面向: ${facing}\n${timeStr}\n模式: ${world.mode === 'survival' ? '生存' : (world.mode === 'creative' ? '创造' : '平坦')}`;
+  if (absX > absZ) {
+    facing = _debugDirection.x > 0 ? '东 (+X)' : '西 (-X)';
   } else {
-    f3DebugElement.style.display = 'none';
+    facing = _debugDirection.z > 0 ? '南 (+Z)' : '北 (-Z)';
   }
+
+  // 游戏时间
+  const { hours, minutes } = sky.getClockTime();
+  const timeStr = `时间: ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+
+  f3DebugElement.innerText = `我的方块世界 (F3 调试)\n${xyz}\n${block}\n面向: ${facing}\n${timeStr}\n模式: ${world.mode === 'survival' ? '生存' : (world.mode === 'creative' ? '创造' : '平坦')}`;
 }
 
 // 绑定 F3 切换
@@ -561,5 +538,8 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'F3') {
     e.preventDefault();
     showDebug = !showDebug;
+    if (f3DebugElement) {
+      f3DebugElement.style.display = showDebug ? 'block' : 'none';
+    }
   }
 });

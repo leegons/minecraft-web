@@ -236,8 +236,13 @@ export class NPC {
 
     /**
      * 每帧更新 AI 逻辑和动画
+     * 距离摄像机超过 50 格时跳过更新，节省 CPU 开销
      */
     update(delta: number, cameraPosition: THREE.Vector3) {
+        const ddx = this.position.x - cameraPosition.x;
+        const ddz = this.position.z - cameraPosition.z;
+        if (ddx * ddx + ddz * ddz > 2500) return; // 50 格以外不更新
+
         this.wanderTimer += delta;
         if (this.wanderTimer >= this.WANDER_INTERVAL) {
             this.wanderTimer = 0;
